@@ -1,0 +1,9 @@
+version: '3'
+services:
+  devenv:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - "c:\\work\\logscan_python:/root/logscan"
+      - "c:\\work\\logscan_testdata:/root/testdata"
