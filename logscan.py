@@ -162,7 +162,6 @@ def main():
     args = vars(parser.parse_args())
 
     try:
-        log.info(args)
         scanner = Logscan(print_stats=args['print_stats'])
         scanner.load_patterns(args['patterns-file'])
         scanner.compile_all(hs_db_file=args['hs_db'])
