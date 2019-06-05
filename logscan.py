@@ -127,6 +127,7 @@ class Logscan:
                     line = m.group(PREFIX_DETAILS)
 
             self._line = line
+            self._match = None
             self.hs_db.scan(line, match_event_handler=_hs_match, context=self)
             if self._match:
                 yield self._match
@@ -142,7 +143,6 @@ class Logscan:
             self._match = d
         else:
             self.mismatched_ids.add(self.regexes[id_].id)
-            self._match = None
 
 
 def printNDJSON(input, output):
