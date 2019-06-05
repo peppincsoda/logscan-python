@@ -24,8 +24,8 @@ log.setLevel(logging.INFO)
 log.addHandler(logging.StreamHandler(sys.stderr))
 
 
-def _hs_match(id_, from_, to, flags, scanner):
-    scanner._hs_match(id_, from_, to, flags)
+def _hs_match(id_, from_, to_, flags, scanner):
+    scanner._hs_match(id_, from_, to_, flags)
 
 
 class Logscan:
@@ -89,8 +89,8 @@ class Logscan:
         num_patterns = len(self.regexes)
         expressions = list(map(
             functools.partial(str.encode, encoding='utf-8'),
-            map(operator.itemgetter(self.Regex._fields.index('pattern')), self.regexes))
-        )
+            map(operator.itemgetter(self.Regex._fields.index('pattern')), self.regexes)
+        ))
         ids = list(range(num_patterns))
         flags = list(map(operator.itemgetter(self.Regex._fields.index('flags')), self.regexes))
 

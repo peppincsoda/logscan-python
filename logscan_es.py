@@ -3,7 +3,12 @@ import sys
 
 import elasticsearch_dsl as es_dsl
 from elasticsearch import helpers
-from logscan import Logscan, log
+from logscan import (
+    Logscan,
+    PREFIX_ID,
+    PREFIX_DETAILS,
+    log,
+)
 
 
 INDEX_PREFIX = 'logscan'
@@ -21,7 +26,7 @@ def add_field_mappings(id_, regex, mapping):
             field_name = group_name
             field_type = 'text'
 
-        if id_ != 'prefix' or field_name != 'details': # TODO: constant
+        if id_ != PREFIX_ID or field_name != PREFIX_DETAILS:
             mapping.field(field_name, field_type)
 
 
@@ -37,7 +42,7 @@ def create_indices(scanner):
 
         mapping = es_dsl.Mapping()
         if scanner.prefix_regex:
-            add_field_mappings('prefix', scanner.prefix_regex, mapping)
+            add_field_mappings(PREFIX_ID, scanner.prefix_regex, mapping)
         add_field_mappings(id_, regex, mapping)
         mapping.save(index_name)
 
