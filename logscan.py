@@ -9,8 +9,13 @@ import re
 import sys
 import time
 import traceback
+import types
 
 import hyperscan
+
+
+PREFIX_ID = 'prefix'
+PREFIX_DETAILS = 'details'
 
 
 # Print all log messages to stderr
@@ -27,8 +32,15 @@ class Logscan:
     Regex = collections.namedtuple('Regex', 'id pattern flags')
     pattern_regex = re.compile(r'^(?P<id>.*):/(?P<pattern>.*)/(?P<flags>.*)$')
 
-    def __init__(self, print_stats=False):
-        self.print_stats = print_stats
+    def __init__(self):
+        self.mismatched_ids = set()
+        self.stats = types.SimpleNamespace(
+            pcre_compilation_time=0,
+            hs_compilation_time=0,
+            total_lines=0,
+            total_bytes=0,
+            matched_lines=0,
+        )
 
     def load_patterns(self, patterns_file):
         self.regexes = []
@@ -48,7 +60,7 @@ class Logscan:
                 m = self.pattern_regex.match(line)
                 if m:
                     groups = m.groupdict()
-                    if groups['id'] == 'prefix':
+                    if groups['id'] == PREFIX_ID:
                         self.prefix_regex = re.compile(groups['pattern'])
                     else:
                         groups['flags'] = hyperscan.HS_FLAG_ALLOWEMPTY
@@ -63,8 +75,7 @@ class Logscan:
             for regex in self.regexes
         ]
         end = time.time()
-        if self.print_stats:
-            log.info(f'PCRE compilation time (sec): {end - start}')
+        self.stats.pcre_compilation_time = end - start
 
     def compile_hs(self, hs_db_file=None):
         if hs_db_file and os.path.isfile(hs_db_file):
@@ -91,8 +102,7 @@ class Logscan:
             flags=flags,
         )
         end = time.time()
-        if self.print_stats:
-            log.info(f'Hyperscan DB compilation time (sec): {end - start}')
+        self.stats.hs_compilation_time = end - start
 
         if hs_db_file:
             log.info(f'Saving Hyperscan DB to disk: {hs_db_file}')
@@ -103,41 +113,23 @@ class Logscan:
         self.compile_pcre()
         self.compile_hs(hs_db_file=hs_db_file)
 
-    def scan(self, input, output):
-        lineno = 0
-        total_bytes = 0
-        self._matched_lines = 0
-        self._mismatched_ids = set()
-        self.output = output
-
-        start = time.time()
+    def scan(self, input):
         while True:
             line = input.readline()
             if not line:
                 break
 
-            lineno += 1
-            total_bytes += len(line)
+            self.stats.total_lines += 1
+            self.stats.total_bytes += len(line)
             if self.prefix_regex:
                 m = self.prefix_regex.match(line)
                 if m:
-                    line = m.group('details')
+                    line = m.group(PREFIX_DETAILS)
 
             self._line = line
             self.hs_db.scan(line, match_event_handler=_hs_match, context=self)
-        end = time.time()
-
-        if self._mismatched_ids:
-            log.error('The following patterns were found by Hyperscan but did not match their PCREs:')
-            log.error(', '.join(self._mismatched_ids))
-
-        if self.print_stats:
-            duration = end - start
-            log.info(f'Total scanning time (sec): {duration}')
-            log.info(f'Total number of lines: {lineno}')
-            log.info(f'Total bytes: {total_bytes}')
-            log.info(f'Average throughput (bytes/sec): {total_bytes / duration}')
-            log.info(f'Total matched lines: {self._matched_lines}')
+            if self._match:
+                yield self._match
 
     def _hs_match(self, id_, from_, to, flags):
         m = self.compiled[id_].match(self._line)
@@ -146,10 +138,16 @@ class Logscan:
                 'id': self.regexes[id_].id,
             }
             d.update(m.groupdict())
-            self.output.write(json.dumps(d) + '\n')
-            self._matched_lines += 1
+            self.stats.matched_lines += 1
+            self._match = d
         else:
-            self._mismatched_ids.add(self.regexes[id_].id)
+            self.mismatched_ids.add(self.regexes[id_].id)
+            self._match = None
+
+
+def printNDJSON(input, output):
+    for match in input:
+        output.write(json.dumps(match) + '\n')
 
 
 def main():
@@ -161,23 +159,41 @@ def main():
     parser.add_argument('--print-stats', help='print performance statistics', action='store_true')
     args = vars(parser.parse_args())
 
+    output_file = None
     try:
-        scanner = Logscan(print_stats=args['print_stats'])
+        scanner = Logscan()
         scanner.load_patterns(args['patterns-file'])
         scanner.compile_all(hs_db_file=args['hs_db'])
+
         output_file = args['output_file']
         if output_file:
             output = open(output_file, 'w')
         else:
             output = sys.stdout
 
+        start = time.time()
         input_files = args['input-file']
         if input_files:
             for input_file in input_files:
                 with open(input_file, 'r') as input:
-                    scanner.scan(input, output)
+                    printNDJSON(scanner.scan(input), output)
         else:
-            scanner.scan(sys.stdin, output)
+            printNDJSON(scanner.scan(sys.stdin), output)
+        end = time.time()
+
+        if scanner.mismatched_ids:
+            log.error('The following patterns were found by Hyperscan but did not match their PCREs:')
+            log.error(', '.join(scanner.mismatched_ids))
+
+        if args['print_stats']:
+            duration = end - start
+            log.info(f'PCRE compilation time (sec): {scanner.stats.pcre_compilation_time}')
+            log.info(f'Hyperscan DB compilation time (sec): {scanner.stats.hs_compilation_time}')
+            log.info(f'Total scanning time (sec): {duration}')
+            log.info(f'Total number of lines: {scanner.stats.total_lines}')
+            log.info(f'Total bytes: {scanner.stats.total_bytes}')
+            log.info(f'Average throughput (bytes/sec): {scanner.stats.total_bytes / duration}')
+            log.info(f'Total matched lines: {scanner.stats.matched_lines}')
 
     except Exception:
         # hyperscan crashes Python if an exception escapes, that's why everything is catched here
