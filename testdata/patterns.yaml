@@ -1,0 +1,9 @@
+prefix:
+  pattern: (?P<timestamp>[^|]*)\|(?P<process>[^|]*)\|(?P<thread_id>[^|]*)\|
+  fields:
+    timestamp: es_date(%Y-%m-%dT%H:%M:%S.%f)
+    thread_id: integer
+
+patterns:
+  TEST: test(?P<letters>[a-z]{4})
+  TEST2: test2(?P<letters>[a-z]{4})

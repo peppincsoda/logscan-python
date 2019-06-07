@@ -1,2 +1,4 @@
 elasticsearch-dsl>=7.0.0,<8.0.0
 hyperscan==0.1.1
+jsonschema==3.0.1
+pyyaml==5.1.1

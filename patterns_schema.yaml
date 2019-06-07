@@ -1,0 +1,33 @@
+$schema: http://json-schema.org/schema#
+$id: http://peppincsoda.github.io/logscan/schemas/patterns_schema.json
+title: Logscan Patterns Schema
+type: object
+
+properties:
+  prefix:
+    description: Common prefix for all patterns
+    type: [ string, object ]
+    properties:
+      pattern:
+        type: string
+      fields:
+        type: object
+        additionalProperties:
+          type: string
+    required: [ pattern, fields ]
+
+  patterns:
+    description: List of patterns
+    type: object
+    additionalProperties:
+      type: [ string, object ]
+      properties:
+        pattern:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+      required: [ pattern, fields ]
+
+required: [ patterns ]

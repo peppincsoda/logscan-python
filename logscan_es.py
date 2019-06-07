@@ -1,17 +1,32 @@
 import argparse
+import datetime
+import re
 import sys
 
 import elasticsearch_dsl as es_dsl
 from elasticsearch import helpers
-from logscan import (
-    Logscan,
-    PREFIX_ID,
-    PREFIX_DETAILS,
-    log,
-)
+from logscan import Logscan, LogscanError, log
 
 
 INDEX_PREFIX = 'logscan'
+ES_DATE_REGEX = re.compile(r'^es_date\((?P<format>.*)\)$')
+
+
+def create_field_parser(field_type):
+    # Default type is 'text'; no parsing required
+    if not field_type:
+        return None
+
+    m = ES_DATE_REGEX.match(field_type)
+    if m:
+        format_ = m.group('format')
+
+        # Parses datetime using strptime and returns milliseconds since epoch in UTC as integer
+        def es_date(value):
+            dt = datetime.datetime.strptime(value, format_)
+            return int(dt.timestamp() * 1000)
+
+        return es_date
 
 
 def connect_elasticsearch(url):
@@ -19,39 +34,40 @@ def connect_elasticsearch(url):
 
 
 def add_field_mappings(id_, regex, mapping):
-    for group_name in regex.groupindex.keys():
-        try:
-            field_name, field_type = group_name.split(':')
-        except ValueError:
-            field_name = group_name
-            field_type = 'text'
+    for field_name in regex.field_names:
+        field_type = regex.field_types.get(field_name)
 
-        if id_ != PREFIX_ID or field_name != PREFIX_DETAILS:
-            mapping.field(field_name, field_type)
+        # Map types to Elasticsearch types
+        if not field_type:
+            field_type = 'text' # Default type is 'text'
+        elif ES_DATE_REGEX.match(field_type):
+            field_type = 'date'
+
+        mapping.field(field_name, field_type)
 
 
 def create_indices(scanner):
-    for i, regex in enumerate(scanner.compiled):
-        id_ = scanner.regexes[i].id
+    for regex in scanner.regexes:
+        id_ = regex.id.lower()
 
-        index_name = f'{INDEX_PREFIX}-{id_}'
+        index_name = f'{INDEX_PREFIX}-{id_}'.lower()
         index = es_dsl.Index(index_name)
         if index.exists():
             index.delete()
         index.create()
 
         mapping = es_dsl.Mapping()
-        if scanner.prefix_regex:
-            add_field_mappings(PREFIX_ID, scanner.prefix_regex, mapping)
         add_field_mappings(id_, regex, mapping)
         mapping.save(index_name)
 
 
 def gendata_for_bulk(input):
     for event in input:
+        id_ = event['id']
+        index_name = f'{INDEX_PREFIX}-{id_}'.lower()
         yield {
-            '_index': f'{INDEX_PREFIX}-{event["id"]}',
-            'doc': event,
+            **event,
+            '_index': index_name,
         }
 
 
@@ -63,8 +79,12 @@ def main():
     parser.add_argument('--hs-db', help='Hyperscan DB file')
     args = parser.parse_args()
 
-    scanner = Logscan()
-    scanner.load_patterns(args.patterns_file)
+    scanner = Logscan(create_field_parser)
+    try:
+        scanner.load_patterns(args.patterns_file)
+    except LogscanError as error:
+        log.error(error)
+        return -1
     scanner.compile_all(hs_db_file=args.hs_db)
 
     es_conn = connect_elasticsearch(args.url)
